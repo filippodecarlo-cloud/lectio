@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="robots" content="noindex, nofollow">
+  <title>…</title>
+  <script>
+    // GitHub Pages mostra questa pagina per ogni indirizzo inesistente, come /lectio/emv:
+    // la parte dopo il nome del sito è la chiave e viene passata all'app.
+    (function () {
+      var parts = location.pathname.split('/').filter(Boolean);
+      var base = '/' + (parts[0] || '') + '/';
+      var key = parts[1] || '';
+      location.replace(/^[A-Za-z0-9-]+$/.test(key) && key !== 'index.html' ? base + '#k=' + key.toLowerCase() : base);
+    })();
+  </script>
+</head>
+<body></body>
+</html>

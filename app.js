@@ -219,9 +219,10 @@ async function deriveKey(passphrase, meta) {
 /** La chiave da un link ("...#k=abcd-efgh") o da una chiave incollata da sola. */
 function keyFrom(text) {
   text = String(text || '').trim();
-  const m = text.match(/[#&?/]k=([A-Za-z0-9-]+)/);
-  if (m) return m[1];
-  return /^[A-Za-z0-9-]{8,}$/.test(text) ? text : null;
+  // "...#k=emv", oppure l'indirizzo breve ".../lectio/emv", oppure la sola chiave
+  const m = text.match(/[#&?/]k=([A-Za-z0-9-]+)/) || text.match(/\.github\.io\/[^/]+\/([A-Za-z0-9-]+)\/?(?:[?#].*)?$/);
+  if (m) return m[1].toLowerCase();
+  return /^[A-Za-z0-9-]{3,}$/.test(text) ? text.toLowerCase() : null;   // maiuscole e minuscole non contano
 }
 
 async function loadIndex(passphrase) {

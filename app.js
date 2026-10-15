@@ -1005,7 +1005,16 @@ function bind() {
   for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => switchTab(t.dataset.pane));
   $('toValtorta').addEventListener('click', () => { switchTab('valtortaPane'); $('valtortaPane').scrollIntoView({ block: 'start' }); });
 
-  window.addEventListener('hashchange', () => { if (!ignoreHash) route(); });
+  window.addEventListener('hashchange', () => {
+    if (ignoreHash) return;
+    const k = keyFrom(location.hash);   // link con la chiave aperto ad app già aperta
+    if (k) {
+      history.replaceState(null, '', location.pathname + location.search);
+      unlock(k);
+      return;
+    }
+    route();
+  });
   // a mezzanotte (o al ritorno sull'app il giorno dopo) aggiorna limiti e "oggi"
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && $('dateInput').min !== ymd(addDays(today(), -MAX_DAYS))) {

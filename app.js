@@ -775,7 +775,6 @@ function bindTts() {
 /* ------------------------------------------------------------------ indice dei capitoli */
 
 const indexUi = {
-  mode: load('indiceModo', 'rapido'),        // 'rapido' | 'completo'
   scope: load('ricercaAmbito', 'titoli'),    // 'titoli' | 'testo'
   pushed: false,
   filtered: false,
@@ -801,32 +800,12 @@ function chaptersByVol() {
 const fmt = (x) => x.toLocaleString('it-IT');
 
 function renderIndex() {
-  for (const b of document.querySelectorAll('.seg-btn')) b.classList.toggle('active', b.dataset.mode === indexUi.mode);
   for (const b of document.querySelectorAll('.scope-btn')) b.classList.toggle('active', b.dataset.scope === indexUi.scope);
-  $('volJump').hidden = indexUi.mode !== 'rapido';
-  $('indexSearch').hidden = indexUi.mode !== 'completo';
   $('indexFilter').placeholder = indexUi.scope === 'testo'
     ? 'Cerca in tutto il libro (es. misericordia, nozze di Cana)'
     : 'Filtra i titoli (es. Lazzaro, Cana)';
   indexUi.filtered = false;
-  if (indexUi.mode === 'rapido') renderQuick();
-  else renderTree();
-}
-
-function renderQuick() {
-  const cur = state.chapter;
-  const last = load('ultimoCapitolo', null);
-  const byVol = chaptersByVol();
-  $('volJump').innerHTML = [...byVol.keys()].map((v) => `<button type="button" data-vol="${v}">Vol. ${v}</button>`).join('');
-  let html = '';
-  for (const [v, list] of byVol) {
-    const periods = [...new Set(list.map((c) => partOf(c.n)?.title).filter(Boolean))];
-    html += `<section class="idx-vol" id="idx-vol-${v}"><h3>Volume ${v} <small>cap. ${list[0].n}–${list[list.length - 1].n}</small></h3>
-      <p class="idx-periods">${periods.map(esc).join(' · ')}</p><div class="idx-grid">` +
-      list.map((c) => `<button type="button" class="idx-n${c.n === cur ? ' cur' : ''}${c.n === last ? ' last' : ''}" data-n="${c.n}" title="${esc(c.title)}">${c.n}</button>`).join('') +
-      '</div></section>';
-  }
-  $('indexBody').innerHTML = html;
+  renderTree();
 }
 
 /** Albero come in "Esplora risorse": Volume → Periodo → Capitoli; aperto solo il ramo del capitolo attuale. */
@@ -1110,16 +1089,6 @@ function bindIndex() {
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   $('indexBtn').addEventListener('click', openIndex);
   $('indexClose').addEventListener('click', () => closeIndex());
-  for (const b of document.querySelectorAll('.seg-btn')) {
-    b.addEventListener('click', () => {
-      indexUi.mode = b.dataset.mode;
-      store('indiceModo', indexUi.mode);
-      $('indexFilter').value = '';
-      renderIndex();
-      const target = $('indexBody').querySelector('.cur, .last');
-      if (target) target.scrollIntoView({ block: 'center' });
-    });
-  }
   for (const b of document.querySelectorAll('.scope-btn')) {
     b.addEventListener('click', () => {
       indexUi.scope = b.dataset.scope;
@@ -1131,10 +1100,6 @@ function bindIndex() {
       $('indexFilter').focus();
     });
   }
-  $('volJump').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-vol]');
-    if (b) $(`idx-vol-${b.dataset.vol}`).scrollIntoView({ block: 'start', behavior: 'smooth' });
-  });
   $('indexFilter').addEventListener('input', onIndexInput);
   $('indexSearch').addEventListener('submit', (e) => {
     e.preventDefault();

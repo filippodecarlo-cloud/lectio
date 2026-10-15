@@ -38,6 +38,7 @@
       <button class="text-btn" id="todayBtn">Oggi</button>
     </nav>
     <div class="tools">
+      <button class="icon-btn" id="indexBtn" title="Indice dei capitoli" aria-label="Indice dei capitoli">☰</button>
       <button class="icon-btn" id="themeToggle" title="Modalità notte" aria-label="Modalità notte">☾</button>
       <button class="icon-btn" id="fontDown" title="Testo più piccolo" aria-label="Testo più piccolo">A−</button>
       <button class="icon-btn" id="fontUp" title="Testo più grande" aria-label="Testo più grande">A+</button>
@@ -130,6 +131,22 @@
       </select>
     </div>
   </div>
+  <div class="sheet" id="indexSheet" role="dialog" aria-modal="true" aria-labelledby="indexTitle" hidden>
+    <div class="sheet-head">
+      <div class="sheet-row">
+        <h2 id="indexTitle">Indice</h2>
+        <div class="seg">
+          <button type="button" class="seg-btn" data-mode="rapido">Rapido</button>
+          <button type="button" class="seg-btn" data-mode="completo">Completo</button>
+        </div>
+        <button type="button" class="icon-btn" id="indexClose" title="Chiudi" aria-label="Chiudi l'indice">✕</button>
+      </div>
+      <nav class="vol-jump" id="volJump" aria-label="Vai al volume"></nav>
+      <input type="search" id="indexFilter" placeholder="Filtra per parole del titolo (es. Lazzaro, Cana…)" autocomplete="off" hidden>
+    </div>
+    <div class="sheet-body" id="indexBody"></div>
+  </div>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>

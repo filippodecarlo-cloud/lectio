@@ -769,6 +769,133 @@ function bindTts() {
   updatePlayer();
 }
 
+/* ------------------------------------------------------------------ indice dei capitoli */
+
+const indexUi = { mode: load('indiceModo', 'rapido'), pushed: false };
+
+function partOf(n) {
+  let p = null;
+  for (const x of state.index.parts || []) if (x.from <= n) p = x;
+  return p;
+}
+
+function renderIndex() {
+  const cur = state.chapter;
+  const last = load('ultimoCapitolo', null);
+  const byVol = new Map();
+  for (const c of state.index.chapters) {
+    if (!byVol.has(c.vol)) byVol.set(c.vol, []);
+    byVol.get(c.vol).push(c);
+  }
+  const starts = new Map((state.index.parts || []).map((p) => [p.from, p.title]));
+  const mark = (n) => (n === cur ? ' cur' : '') + (n === last ? ' last' : '');
+
+  $('volJump').innerHTML = [...byVol.keys()].map((v) => `<button type="button" data-vol="${v}">Vol. ${v}</button>`).join('');
+  for (const b of document.querySelectorAll('.seg-btn')) b.classList.toggle('active', b.dataset.mode === indexUi.mode);
+  $('indexFilter').hidden = indexUi.mode !== 'completo';
+
+  let html = '';
+  for (const [v, list] of byVol) {
+    const a = list[0].n;
+    const b = list[list.length - 1].n;
+    const periods = [...new Set(list.map((c) => partOf(c.n)?.title).filter(Boolean))];
+    html += `<section class="idx-vol" id="idx-vol-${v}"><h3>Volume ${v} <small>cap. ${a}–${b}</small></h3>`;
+    if (indexUi.mode === 'rapido') {
+      html += `<p class="idx-periods">${periods.map(esc).join(' · ')}</p><div class="idx-grid">`;
+      html += list.map((c) => `<button type="button" class="idx-n${mark(c.n)}" data-n="${c.n}" title="${esc(c.title)}">${c.n}</button>`).join('');
+      html += '</div>';
+    } else {
+      for (const c of list) {
+        if (starts.has(c.n) || c.n === a) {
+          html += `<h4 class="idx-part">${esc(partOf(c.n)?.title || '')}${starts.has(c.n) ? '' : ' (continua)'}</h4>`;
+        }
+        html += `<div class="idx-row${mark(c.n)}" data-n="${c.n}" data-t="${esc(norm(c.title))}">
+          <button type="button" class="idx-open" data-n="${c.n}"><span class="num">${c.n}.</span> <span class="ttl">${esc(c.title)}</span>${c.refs ? `<span class="refs">${esc(c.refs)}</span>` : ''}</button>
+          <button type="button" class="idx-play tts-only" data-n="${c.n}" data-play="1" title="Apri e ascolta" aria-label="Apri e ascolta il capitolo ${c.n}">▶</button>
+        </div>`;
+      }
+    }
+    html += '</section>';
+  }
+  $('indexBody').innerHTML = html;
+  filterIndex();
+}
+
+function filterIndex() {
+  const words = norm($('indexFilter').value).split(/\s+/).filter((w) => w.length > 1);
+  const on = indexUi.mode === 'completo' && words.length > 0;
+  $('indexBody').classList.toggle('filtering', on);
+  if (indexUi.mode !== 'completo') return;
+  for (const sec of document.querySelectorAll('.idx-vol')) {
+    let any = false;
+    for (const row of sec.querySelectorAll('.idx-row')) {
+      const show = !on || words.every((w) => row.dataset.t.includes(w) || row.dataset.n === w);
+      row.hidden = !show;
+      any = any || show;
+    }
+    sec.hidden = !any;
+  }
+}
+
+function openIndex() {
+  if (!state.index) {
+    toast('Per l\'indice serve la chiave');
+    return;
+  }
+  closeSearch();
+  renderIndex();
+  $('indexSheet').hidden = false;
+  document.body.classList.add('noscroll');
+  // il tasto "indietro" del telefono chiude l'indice invece di uscire dall'app
+  history.pushState({ indice: true }, '', location.href);
+  indexUi.pushed = true;
+  const target = $('indexBody').querySelector(`[data-n="${state.chapter || load('ultimoCapitolo', 1)}"]`);
+  if (target) target.scrollIntoView({ block: 'center' });
+}
+
+function closeIndex(fromBack = false) {
+  if ($('indexSheet').hidden) return;
+  $('indexSheet').hidden = true;
+  document.body.classList.remove('noscroll');
+  if (indexUi.pushed && !fromBack) history.back();
+  indexUi.pushed = false;
+}
+
+async function pickChapter(n, play) {
+  if (play && !NATIVE && hasTts) speechSynthesis.speak(new SpeechSynthesisUtterance(''));   // iPhone: sblocca la voce nel tocco
+  closeIndex();
+  switchTab('valtortaPane');
+  await openChapter(n, { scroll: true });
+  if (play && state.chapter === n) ttsStart('valtorta', 0);
+}
+
+function bindIndex() {
+  $('indexBtn').addEventListener('click', openIndex);
+  $('indexClose').addEventListener('click', () => closeIndex());
+  for (const b of document.querySelectorAll('.seg-btn')) {
+    b.addEventListener('click', () => {
+      indexUi.mode = b.dataset.mode;
+      store('indiceModo', indexUi.mode);
+      renderIndex();
+      const target = $('indexBody').querySelector('.cur, .last');
+      if (target) target.scrollIntoView({ block: 'center' });
+    });
+  }
+  $('volJump').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-vol]');
+    if (b) $(`idx-vol-${b.dataset.vol}`).scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
+  $('indexFilter').addEventListener('input', filterIndex);
+  $('indexBody').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-n]');
+    if (b) pickChapter(Number(b.dataset.n), b.dataset.play === '1');
+  });
+  window.addEventListener('popstate', () => closeIndex(true));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeIndex();
+  });
+}
+
 /* ------------------------------------------------------------------ ricerca */
 
 async function runSearch(q) {
@@ -1043,6 +1170,7 @@ async function main() {
   switchTab('gospelPane');
   bind();
   bindTts();
+  bindIndex();
   // la chiave nel link viene salvata e tolta dall'indirizzo visibile
   const fromLink = keyFrom(location.hash);
   if (fromLink) {

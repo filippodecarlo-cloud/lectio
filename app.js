@@ -293,7 +293,10 @@ function loadVolume(vol) {
 async function chapterParas(n) {
   const info = state.byNum.get(n);
   const vol = await loadVolume(info.vol);
-  const paras = vol[n] || [];
+  return cleanParas(vol[n] || []);
+}
+
+function cleanParas(paras) {
   if (!$('noNotes').checked) return paras;
   // note dell'editore tra parentesi, es. "(Si odiano poiché imperversava la seconda guerra mondiale…)"
   return paras.map((p) => p.replace(/\s*\([^()]{18,}\)/g, '').trim()).filter(Boolean);
@@ -771,7 +774,14 @@ function bindTts() {
 
 /* ------------------------------------------------------------------ indice dei capitoli */
 
-const indexUi = { mode: load('indiceModo', 'rapido'), pushed: false };
+const indexUi = {
+  mode: load('indiceModo', 'rapido'),        // 'rapido' | 'completo'
+  scope: load('ricercaAmbito', 'titoli'),    // 'titoli' | 'testo'
+  pushed: false,
+  filtered: false,
+  timer: null,
+  token: 0,
+};
 
 function partOf(n) {
   let p = null;
@@ -779,63 +789,282 @@ function partOf(n) {
   return p;
 }
 
-function renderIndex() {
-  const cur = state.chapter;
-  const last = load('ultimoCapitolo', null);
+function chaptersByVol() {
   const byVol = new Map();
   for (const c of state.index.chapters) {
     if (!byVol.has(c.vol)) byVol.set(c.vol, []);
     byVol.get(c.vol).push(c);
   }
-  const starts = new Map((state.index.parts || []).map((p) => [p.from, p.title]));
-  const mark = (n) => (n === cur ? ' cur' : '') + (n === last ? ' last' : '');
+  return byVol;
+}
 
-  $('volJump').innerHTML = [...byVol.keys()].map((v) => `<button type="button" data-vol="${v}">Vol. ${v}</button>`).join('');
+const fmt = (x) => x.toLocaleString('it-IT');
+
+function renderIndex() {
   for (const b of document.querySelectorAll('.seg-btn')) b.classList.toggle('active', b.dataset.mode === indexUi.mode);
-  $('indexFilter').hidden = indexUi.mode !== 'completo';
+  for (const b of document.querySelectorAll('.scope-btn')) b.classList.toggle('active', b.dataset.scope === indexUi.scope);
+  $('volJump').hidden = indexUi.mode !== 'rapido';
+  $('indexSearch').hidden = indexUi.mode !== 'completo';
+  $('indexFilter').placeholder = indexUi.scope === 'testo'
+    ? 'Cerca in tutto il libro (es. misericordia, nozze di Cana)'
+    : 'Filtra i titoli (es. Lazzaro, Cana)';
+  indexUi.filtered = false;
+  if (indexUi.mode === 'rapido') renderQuick();
+  else renderTree();
+}
 
+function renderQuick() {
+  const cur = state.chapter;
+  const last = load('ultimoCapitolo', null);
+  const byVol = chaptersByVol();
+  $('volJump').innerHTML = [...byVol.keys()].map((v) => `<button type="button" data-vol="${v}">Vol. ${v}</button>`).join('');
   let html = '';
   for (const [v, list] of byVol) {
-    const a = list[0].n;
-    const b = list[list.length - 1].n;
     const periods = [...new Set(list.map((c) => partOf(c.n)?.title).filter(Boolean))];
-    html += `<section class="idx-vol" id="idx-vol-${v}"><h3>Volume ${v} <small>cap. ${a}–${b}</small></h3>`;
-    if (indexUi.mode === 'rapido') {
-      html += `<p class="idx-periods">${periods.map(esc).join(' · ')}</p><div class="idx-grid">`;
-      html += list.map((c) => `<button type="button" class="idx-n${mark(c.n)}" data-n="${c.n}" title="${esc(c.title)}">${c.n}</button>`).join('');
-      html += '</div>';
-    } else {
-      for (const c of list) {
-        if (starts.has(c.n) || c.n === a) {
-          html += `<h4 class="idx-part">${esc(partOf(c.n)?.title || '')}${starts.has(c.n) ? '' : ' (continua)'}</h4>`;
-        }
-        html += `<div class="idx-row${mark(c.n)}" data-n="${c.n}" data-t="${esc(norm(c.title))}">
-          <button type="button" class="idx-open" data-n="${c.n}"><span class="num">${c.n}.</span> <span class="ttl">${esc(c.title)}</span>${c.refs ? `<span class="refs">${esc(c.refs)}</span>` : ''}</button>
-          <button type="button" class="idx-play tts-only" data-n="${c.n}" data-play="1" title="Apri e ascolta" aria-label="Apri e ascolta il capitolo ${c.n}">▶</button>
-        </div>`;
-      }
-    }
-    html += '</section>';
+    html += `<section class="idx-vol" id="idx-vol-${v}"><h3>Volume ${v} <small>cap. ${list[0].n}–${list[list.length - 1].n}</small></h3>
+      <p class="idx-periods">${periods.map(esc).join(' · ')}</p><div class="idx-grid">` +
+      list.map((c) => `<button type="button" class="idx-n${c.n === cur ? ' cur' : ''}${c.n === last ? ' last' : ''}" data-n="${c.n}" title="${esc(c.title)}">${c.n}</button>`).join('') +
+      '</div></section>';
   }
   $('indexBody').innerHTML = html;
-  filterIndex();
 }
 
-function filterIndex() {
-  const words = norm($('indexFilter').value).split(/\s+/).filter((w) => w.length > 1);
-  const on = indexUi.mode === 'completo' && words.length > 0;
-  $('indexBody').classList.toggle('filtering', on);
-  if (indexUi.mode !== 'completo') return;
-  for (const sec of document.querySelectorAll('.idx-vol')) {
-    let any = false;
-    for (const row of sec.querySelectorAll('.idx-row')) {
-      const show = !on || words.every((w) => row.dataset.t.includes(w) || row.dataset.n === w);
-      row.hidden = !show;
-      any = any || show;
+/** Albero come in "Esplora risorse": Volume → Periodo → Capitoli; aperto solo il ramo del capitolo attuale. */
+function renderTree() {
+  const cur = state.chapter;
+  const last = load('ultimoCapitolo', null);
+  const focus = cur || last;
+  let html = '';
+  for (const [v, list] of chaptersByVol()) {
+    const groups = [];
+    for (const c of list) {
+      const p = partOf(c.n);
+      if (!groups.length || groups[groups.length - 1].part !== p) groups.push({ part: p, rows: [] });
+      groups[groups.length - 1].rows.push(c);
     }
-    sec.hidden = !any;
+    const volOpen = list.some((c) => c.n === focus);
+    html += `<details class="tree tree-vol" id="idx-vol-${v}"${volOpen ? ' open' : ''}>
+      <summary><span class="tw" aria-hidden="true"></span><b>Volume ${v}</b> <small>cap. ${list[0].n}–${list[list.length - 1].n}</small></summary>`;
+    for (const g of groups) {
+      const cont = g.part && g.part.from < g.rows[0].n;
+      const partOpen = g.rows.some((c) => c.n === focus);
+      html += `<details class="tree tree-part"${partOpen ? ' open' : ''}>
+        <summary><span class="tw" aria-hidden="true"></span><span class="ttl">${esc(g.part ? g.part.title : '')}${cont ? ' <i>(continua)</i>' : ''}</span><small>${g.rows.length} cap.</small></summary>` +
+        g.rows.map((c) => `<div class="idx-row${c.n === cur ? ' cur' : ''}${c.n === last ? ' last' : ''}" data-n="${c.n}" data-t="${esc(norm(c.title))}">
+          <button type="button" class="idx-open" data-n="${c.n}"><span class="num">${c.n}.</span> <span class="ttl">${esc(c.title)}</span>${c.refs ? `<span class="refs">${esc(c.refs)}</span>` : ''}</button>
+          <button type="button" class="idx-play tts-only" data-n="${c.n}" data-play="1" title="Apri e ascolta" aria-label="Apri e ascolta il capitolo ${c.n}">▶</button>
+        </div>`).join('') +
+        '</details>';
+    }
+    html += '</details>';
+  }
+  $('indexBody').innerHTML = html;
+}
+
+/** Filtro sui titoli: mostra solo i rami con titoli corrispondenti, aperti. */
+function filterTitles() {
+  const words = norm($('indexFilter').value).split(/\s+/).filter((w) => w.length > 1);
+  if (!words.length) {
+    if (indexUi.filtered) renderTree();
+    indexUi.filtered = false;
+    return;
+  }
+  if (!$('indexBody').querySelector('.tree-vol')) renderTree();
+  indexUi.filtered = true;
+  let total = 0;
+  for (const vol of document.querySelectorAll('.tree-vol')) {
+    let anyVol = false;
+    for (const part of vol.querySelectorAll('.tree-part')) {
+      let anyPart = false;
+      for (const row of part.querySelectorAll('.idx-row')) {
+        const show = words.every((w) => row.dataset.t.includes(w) || row.dataset.n === w);
+        row.hidden = !show;
+        if (show) total++;
+        anyPart = anyPart || show;
+      }
+      part.hidden = !anyPart;
+      part.open = anyPart;
+      anyVol = anyVol || anyPart;
+    }
+    vol.hidden = !anyVol;
+    vol.open = anyVol;
+  }
+  let note = $('indexBody').querySelector('.res-summary');
+  if (!note) {
+    note = document.createElement('div');
+    note.className = 'res-summary';
+    $('indexBody').prepend(note);
+  }
+  note.textContent = total ? `${fmt(total)} titoli trovati` : 'Nessun titolo trovato. Prova a cercare in "Tutto il testo".';
+}
+
+/* ---------- ricerca in tutto il testo ---------- */
+
+const corpus = { ready: null, notes: null, chapters: [] };   // [{n, vol, paras, low}]
+
+/** Minuscole e senza accenti, mantenendo la stessa lunghezza (le posizioni restano valide sul testo originale). */
+function fold(s) {
+  return s.toLowerCase()
+    .replace(/[’‘`´]/g, "'").replace(/[“”«»„]/g, '"')
+    .replace(/[àáâãä]/g, 'a').replace(/[èéêë]/g, 'e').replace(/[ìíîï]/g, 'i')
+    .replace(/[òóôõö]/g, 'o').replace(/[ùúûü]/g, 'u').replace(/ç/g, 'c').replace(/ñ/g, 'n');
+}
+
+function loadCorpus(onProgress) {
+  const notes = $('noNotes').checked;
+  if (corpus.ready && corpus.notes === notes) return corpus.ready;
+  corpus.notes = notes;
+  corpus.chapters = [];
+  corpus.ready = (async () => {
+    const byVol = chaptersByVol();
+    let done = 0;
+    for (const [v, list] of byVol) {
+      const data = await loadVolume(v);
+      for (const c of list) {
+        const paras = cleanParas(data[c.n] || []);
+        corpus.chapters.push({ n: c.n, vol: v, paras, low: paras.map(fold) });
+      }
+      done++;
+      if (onProgress) onProgress(done, byVol.size);
+      await new Promise((r) => setTimeout(r));   // lascia respirare l'interfaccia
+    }
+  })();
+  corpus.ready.catch(() => { corpus.ready = null; });
+  return corpus.ready;
+}
+
+async function runTextSearch() {
+  const raw = $('indexFilter').value.trim().replace(/^["“«]|["”»]$/g, '').replace(/\s+/g, ' ');
+  const token = ++indexUi.token;
+  const body = $('indexBody');
+  if (raw.length < 3) {
+    if (!raw) renderTree();
+    else body.innerHTML = '<div class="res-summary">Scrivi almeno 3 lettere.</div>';
+    return;
+  }
+  if (!corpus.ready || corpus.notes !== $('noNotes').checked) {
+    body.innerHTML = '<div class="res-summary">Preparo la ricerca nel testo…</div>';
+  }
+  try {
+    await loadCorpus((d, t) => {
+      if (token === indexUi.token) body.innerHTML = `<div class="res-summary">Preparo la ricerca nel testo… volume ${d} di ${t}</div>`;
+    });
+  } catch (e) {
+    if (token === indexUi.token) body.innerHTML = '<div class="res-summary">Impossibile caricare il testo: controlla la connessione.</div>';
+    return;
+  }
+  if (token !== indexUi.token) return;   // nel frattempo è stata scritta un'altra ricerca
+
+  const q = fold(raw);
+  const results = [];
+  let total = 0;
+  for (const ch of corpus.chapters) {
+    const hits = [];
+    ch.low.forEach((low, p) => {
+      for (let i = low.indexOf(q); i !== -1; i = low.indexOf(q, i + q.length)) hits.push({ p, i });
+    });
+    if (hits.length) {
+      results.push({ ch, hits });
+      total += hits.length;
+    }
+  }
+  indexUi.results = { q, len: raw.length, results };
+  renderResults(raw, total);
+}
+
+function renderResults(raw, total) {
+  const { results } = indexUi.results;
+  if (!results.length) {
+    $('indexBody').innerHTML = `<div class="res-summary">Nessun risultato per «${esc(raw)}».</div>`;
+    return;
+  }
+  const byVol = new Map();
+  for (const r of results) {
+    if (!byVol.has(r.ch.vol)) byVol.set(r.ch.vol, []);
+    byVol.get(r.ch.vol).push(r);
+  }
+  const few = total <= 12;   // pochi risultati: tutto aperto
+  let html = `<div class="res-summary">«${esc(raw)}»: <b>${fmt(total)}</b> ${total === 1 ? 'risultato' : 'risultati'} in <b>${fmt(results.length)}</b> ${results.length === 1 ? 'capitolo' : 'capitoli'}</div>`;
+  for (const [v, list] of byVol) {
+    const count = list.reduce((t, r) => t + r.hits.length, 0);
+    html += `<details class="tree tree-vol"${few || byVol.size === 1 ? ' open' : ''}>
+      <summary><span class="tw" aria-hidden="true"></span><b>Volume ${v}</b> <small>${fmt(count)} risultati · ${list.length} cap.</small></summary>` +
+      list.map((r) => `<details class="tree res-ch" data-n="${r.ch.n}"${few ? ' open' : ''}>
+        <summary><span class="tw" aria-hidden="true"></span><span class="num">${r.ch.n}.</span><span class="ttl">${esc(state.byNum.get(r.ch.n).title)}</span><span class="badge">${r.hits.length}</span></summary>
+        <div class="res-snips" data-shown="0"></div>
+      </details>`).join('') +
+      '</details>';
+  }
+  $('indexBody').innerHTML = html;
+  for (const d of $('indexBody').querySelectorAll('.res-ch[open]')) showSnippets(d);
+}
+
+/** Gli estratti si preparano solo quando si apre un capitolo, 5 alla volta. */
+function showSnippets(details, more = 5) {
+  const box = details.querySelector('.res-snips');
+  const r = indexUi.results.results.find((x) => x.ch.n === Number(details.dataset.n));
+  if (!r) return;
+  const from = Number(box.dataset.shown);
+  const to = Math.min(r.hits.length, from + more);
+  box.querySelector('.more')?.remove();
+  const len = indexUi.results.q.length;
+  for (const { p, i } of r.hits.slice(from, to)) {
+    const t = r.ch.paras[p];
+    let a = Math.max(0, i - 80);
+    let b = Math.min(t.length, i + len + 100);
+    if (a > 0) a = t.indexOf(' ', a) + 1 || a;
+    if (b < t.length) b = t.lastIndexOf(' ', b) > i + len ? t.lastIndexOf(' ', b) : b;
+    box.insertAdjacentHTML('beforeend', `<button type="button" class="snip" data-n="${r.ch.n}" data-p="${p}" data-i="${i}">${a > 0 ? '… ' : ''}${esc(t.slice(a, i))}<mark>${esc(t.slice(i, i + len))}</mark>${esc(t.slice(i + len, b))}${b < t.length ? ' …' : ''}</button>`);
+  }
+  box.dataset.shown = String(to);
+  if (to < r.hits.length) {
+    box.insertAdjacentHTML('beforeend', `<button type="button" class="more">Mostra altri (${r.hits.length - to})</button>`);
   }
 }
+
+/** Apre il capitolo, evidenzia le parole cercate e porta al punto scelto. */
+async function openHit(n, p, at) {
+  const q = indexUi.results.q;
+  closeIndex();
+  switchTab('valtortaPane');
+  await openChapter(n);
+  if (state.chapter !== n) return;
+  const paras = $('chapterText').querySelectorAll(':scope > p');
+  let target = null;
+  // la frase che contiene proprio l'occorrenza scelta (posizione "at" nel paragrafo)
+  const para = paras[p];
+  const source = (cleanParas((await loadVolume(state.byNum.get(n).vol))[n] || []))[p] || '';
+  let cursor = 0;
+  if (para) {
+    for (const s of para.querySelectorAll('.s')) {
+      const start = source.indexOf(s.textContent, cursor);
+      if (start === -1) continue;
+      cursor = start + s.textContent.length;
+      if (at >= start && at < cursor) { target = s; break; }
+    }
+  }
+  paras.forEach((pe) => {
+    for (const s of pe.querySelectorAll('.s')) {
+      const t = s.textContent;
+      const low = fold(t);
+      if (!low.includes(q)) continue;
+      let html = '';
+      let lastEnd = 0;
+      for (let i = low.indexOf(q); i !== -1; i = low.indexOf(q, lastEnd)) {
+        html += esc(t.slice(lastEnd, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>';
+        lastEnd = i + q.length;
+      }
+      s.innerHTML = html + esc(t.slice(lastEnd));
+    }
+  });
+  (target || paras[p] || $('chapterText')).scrollIntoView({ block: 'center' });
+  if (target) {
+    target.classList.add('flash');   // per far trovare subito la frase all'occhio
+    setTimeout(() => target.classList.remove('flash'), 2500);
+  }
+}
+
+/* ---------- apertura, chiusura, eventi ---------- */
 
 function openIndex() {
   if (!state.index) {
@@ -843,13 +1072,14 @@ function openIndex() {
     return;
   }
   closeSearch();
+  $('indexFilter').value = '';
   renderIndex();
   $('indexSheet').hidden = false;
   document.body.classList.add('noscroll');
   // il tasto "indietro" del telefono chiude l'indice invece di uscire dall'app
   history.pushState({ indice: true }, '', location.href);
   indexUi.pushed = true;
-  const target = $('indexBody').querySelector(`[data-n="${state.chapter || load('ultimoCapitolo', 1)}"]`);
+  const target = $('indexBody').querySelector('.cur') || $('indexBody').querySelector('.last');
   if (target) target.scrollIntoView({ block: 'center' });
 }
 
@@ -869,27 +1099,69 @@ async function pickChapter(n, play) {
   if (play && state.chapter === n) ttsStart('valtorta', 0);
 }
 
+function onIndexInput() {
+  clearTimeout(indexUi.timer);
+  if (indexUi.scope === 'titoli') filterTitles();
+  else indexUi.timer = setTimeout(runTextSearch, 450);
+}
+
 function bindIndex() {
+  // chiudendo l'indice si torna indietro nella cronologia: il browser non deve ripristinare il vecchio scorrimento
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
   $('indexBtn').addEventListener('click', openIndex);
   $('indexClose').addEventListener('click', () => closeIndex());
   for (const b of document.querySelectorAll('.seg-btn')) {
     b.addEventListener('click', () => {
       indexUi.mode = b.dataset.mode;
       store('indiceModo', indexUi.mode);
+      $('indexFilter').value = '';
       renderIndex();
       const target = $('indexBody').querySelector('.cur, .last');
       if (target) target.scrollIntoView({ block: 'center' });
+    });
+  }
+  for (const b of document.querySelectorAll('.scope-btn')) {
+    b.addEventListener('click', () => {
+      indexUi.scope = b.dataset.scope;
+      store('ricercaAmbito', indexUi.scope);
+      const q = $('indexFilter').value;
+      renderIndex();
+      $('indexFilter').value = q;
+      if (q.trim()) onIndexInput();
+      $('indexFilter').focus();
     });
   }
   $('volJump').addEventListener('click', (e) => {
     const b = e.target.closest('[data-vol]');
     if (b) $(`idx-vol-${b.dataset.vol}`).scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
-  $('indexFilter').addEventListener('input', filterIndex);
+  $('indexFilter').addEventListener('input', onIndexInput);
+  $('indexSearch').addEventListener('submit', (e) => {
+    e.preventDefault();
+    clearTimeout(indexUi.timer);
+    if (indexUi.scope === 'testo') runTextSearch();
+    else filterTitles();
+    $('indexFilter').blur();   // chiude la tastiera del telefono
+  });
   $('indexBody').addEventListener('click', (e) => {
+    const snip = e.target.closest('.snip');
+    if (snip) {
+      openHit(Number(snip.dataset.n), Number(snip.dataset.p), Number(snip.dataset.i));
+      return;
+    }
+    const more = e.target.closest('.more');
+    if (more) {
+      showSnippets(more.closest('.res-ch'), 10);
+      return;
+    }
     const b = e.target.closest('button[data-n]');
     if (b) pickChapter(Number(b.dataset.n), b.dataset.play === '1');
   });
+  // "toggle" non risale: lo si ascolta in fase di cattura
+  $('indexBody').addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (d.classList && d.classList.contains('res-ch') && d.open && d.querySelector('.res-snips').dataset.shown === '0') showSnippets(d);
+  }, true);
   window.addEventListener('popstate', () => closeIndex(true));
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeIndex();

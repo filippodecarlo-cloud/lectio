@@ -155,6 +155,7 @@ button, input { font: inherit; color: inherit; }
 .reading .s { cursor: pointer; border-radius: 4px; transition: background-color .2s; }
 .reading .s:hover { background: var(--chip); }
 .reading .s.tts-active { background: var(--hilite); box-shadow: 0 0 0 3px var(--hilite); }
+.reading .s.flash { background: var(--chip); box-shadow: 0 0 0 3px var(--chip); }
 .reading .empty { color: var(--muted); font-style: italic; text-align: left; }
 .unlock { font-family: var(--sans); font-size: 15px; }
 .unlock p { text-align: left; }
@@ -252,11 +253,57 @@ body.noscroll { overflow: hidden; }
   flex: none; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--bg); font-size: 13px; cursor: pointer;
 }
+.idx-search { display: flex; gap: 8px; align-items: center; max-width: 1100px; margin: 10px auto 0; flex-wrap: wrap; }
+.idx-search[hidden], .vol-jump[hidden] { display: none; }
 #indexFilter {
-  display: block; width: 100%; max-width: 1100px; margin: 10px auto 0; height: 40px; padding: 0 14px;
+  flex: 1 1 220px; min-width: 0; height: 40px; padding: 0 14px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
 }
-#indexFilter[hidden] { display: none; }
+.seg.small .scope-btn {
+  height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.seg.small .scope-btn.active { background: var(--paper); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+/* albero richiudibile (volumi, periodi, risultati) */
+.tree { max-width: 1100px; margin: 0 auto; }
+.tree[hidden] { display: none; }
+.tree > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 10px 6px; border-radius: 8px; user-select: none;
+}
+.tree > summary::-webkit-details-marker { display: none; }
+.tree > summary:hover { background: var(--chip); }
+.tree > summary small { color: var(--muted); font-size: 13px; font-weight: 400; }
+.tw::before { content: "▸"; display: inline-block; width: 14px; color: var(--gold); transition: transform .15s; }
+.tree[open] > summary > .tw::before { transform: rotate(90deg); }
+.tree-vol { border-bottom: 1px solid var(--line); }
+.tree-vol > summary { font-family: var(--serif); font-size: 20px; }
+.tree-part { margin-left: 18px; }
+.tree-part > summary { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); font-weight: 600; padding: 8px 6px; }
+.tree-part > summary { flex-wrap: nowrap; }
+.tree-part > summary .ttl { flex: 1; min-width: 0; }
+.tree-part > summary small { text-transform: none; letter-spacing: 0; flex: none; }
+.tree-part > summary i { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tree-part .idx-row { margin-left: 22px; }
+.res-summary { max-width: 1100px; margin: 10px auto 6px; color: var(--muted); font-size: 14px; }
+.res-summary b { color: var(--ink); }
+.res-ch { margin-left: 18px; }
+.res-ch > summary { font-family: var(--serif); font-size: 16px; padding: 7px 6px; flex-wrap: nowrap; }
+.res-ch > summary .ttl { flex: 1; min-width: 0; }
+.res-ch > summary .num { color: var(--accent); font-family: var(--sans); font-size: 13px; font-weight: 600; }
+.badge {
+  font-family: var(--sans); font-size: 12px; font-weight: 600; color: var(--accent-ink); background: var(--accent);
+  border-radius: 999px; padding: 1px 8px; margin-left: auto; flex: none; align-self: center;
+}
+.res-snips { margin: 0 0 8px 40px; display: grid; gap: 6px; }
+.snip, .more {
+  text-align: left; border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+  padding: 8px 12px; cursor: pointer; font-family: var(--serif); font-size: 16px; line-height: 1.45;
+}
+.snip:hover { border-color: var(--gold); }
+.more { font-family: var(--sans); font-size: 13px; color: var(--accent); justify-self: start; }
+mark { background: var(--hilite); color: inherit; border-radius: 3px; padding: 0 1px; }
 .sheet-body {
   flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
   padding: 6px 20px calc(30px + env(safe-area-inset-bottom));
@@ -302,6 +349,10 @@ body.noscroll { overflow: hidden; }
   .sheet-row { gap: 8px; }
   .sheet-row h2 { font-size: 21px; }
   .idx-open { font-size: 16px; padding: 8px 8px; }
+  .tree-part, .res-ch { margin-left: 10px; }
+  .tree-part .idx-row { margin-left: 8px; }
+  .res-snips { margin-left: 12px; }
+  .tree-vol > summary { font-size: 18px; }
 }
 
 /* ---------- riprendi + toast ---------- */

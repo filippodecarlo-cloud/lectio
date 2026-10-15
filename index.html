@@ -142,7 +142,13 @@
         <button type="button" class="icon-btn" id="indexClose" title="Chiudi" aria-label="Chiudi l'indice">✕</button>
       </div>
       <nav class="vol-jump" id="volJump" aria-label="Vai al volume"></nav>
-      <input type="search" id="indexFilter" placeholder="Filtra per parole del titolo (es. Lazzaro, Cana…)" autocomplete="off" hidden>
+      <form class="idx-search" id="indexSearch" autocomplete="off" hidden>
+        <input type="search" id="indexFilter" enterkeyhint="search" autocapitalize="off" spellcheck="false">
+        <div class="seg small">
+          <button type="button" class="scope-btn" data-scope="titoli">Titoli</button>
+          <button type="button" class="scope-btn" data-scope="testo">Tutto il testo</button>
+        </div>
+      </form>
     </div>
     <div class="sheet-body" id="indexBody"></div>
   </div>

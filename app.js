@@ -776,6 +776,8 @@ function bindTts() {
 
 const indexUi = {
   scope: load('ricercaAmbito', 'titoli'),    // 'titoli' | 'testo'
+  section: load('indiceSezione', 'capitoli'), // 'capitoli' | 'personaggi'
+  pview: load('personaggiVista', 'nome'),     // 'nome' | 'ruolo'
   pushed: false,
   filtered: false,
   timer: null,
@@ -800,6 +802,13 @@ function chaptersByVol() {
 const fmt = (x) => x.toLocaleString('it-IT');
 
 function renderIndex() {
+  for (const b of document.querySelectorAll('.sec-btn')) b.classList.toggle('active', b.dataset.sec === indexUi.section);
+  $('indexSearch').hidden = indexUi.section !== 'capitoli';
+  $('peopleSearch').hidden = indexUi.section !== 'personaggi';
+  if (indexUi.section === 'personaggi') {
+    renderPeople();
+    return;
+  }
   for (const b of document.querySelectorAll('.scope-btn')) b.classList.toggle('active', b.dataset.scope === indexUi.scope);
   $('indexFilter').placeholder = indexUi.scope === 'testo'
     ? 'Cerca in tutto il libro (es. misericordia, nozze di Cana)'
@@ -1022,25 +1031,155 @@ async function openHit(n, p, at) {
       if (at >= start && at < cursor) { target = s; break; }
     }
   }
-  paras.forEach((pe) => {
-    for (const s of pe.querySelectorAll('.s')) {
-      const t = s.textContent;
-      const low = fold(t);
-      if (!low.includes(q)) continue;
-      let html = '';
-      let lastEnd = 0;
-      for (let i = low.indexOf(q); i !== -1; i = low.indexOf(q, lastEnd)) {
-        html += esc(t.slice(lastEnd, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>';
-        lastEnd = i + q.length;
-      }
-      s.innerHTML = html + esc(t.slice(lastEnd));
-    }
-  });
+  markAll(q);
   (target || paras[p] || $('chapterText')).scrollIntoView({ block: 'center' });
   if (target) {
     target.classList.add('flash');   // per far trovare subito la frase all'occhio
     setTimeout(() => target.classList.remove('flash'), 2500);
   }
+}
+
+/* ---------- personaggi ---------- */
+
+const people = { list: null, loading: null };
+
+// ordine dei ruoli nella vista "Per ruolo" (gli altri, se compaiono, vanno in fondo)
+const ROLE_ORDER = ['Gesù', 'Parente di Gesù', 'Apostolo', 'Discepolo', 'Amico/Ospite di Gesù', 'Guarito/Miracolato',
+  'Pastore', 'Popolano/Comparsa', 'Bambino/a', 'Servo/Schiavo', 'Samaritano', 'Romano/Straniero convertito',
+  'Soldato romano', 'Autorità/Funzionario romano', 'Corte di Erode', 'Sacerdote/Levita', 'Scriba/Dottore della Legge',
+  'Fariseo', 'Sinedrista/Notabile giudeo', 'Avversario di Gesù', 'Figura biblica', 'Parabola', 'Essere soprannaturale', 'Altro'];
+
+function loadPeople() {
+  if (!people.loading) {
+    people.loading = readData('personaggi').then((list) => {
+      for (const p of list) {
+        const cut = p.n.indexOf(' (');
+        p.main = cut > 0 ? p.n.slice(0, cut) : p.n;
+        p.note = cut > 0 ? p.n.slice(cut + 2).replace(/\)$/, '') : '';
+        p.key = norm(`${p.n} ${p.r}`);
+      }
+      list.sort((a, b) => a.main.localeCompare(b.main, 'it'));
+      list.forEach((p, i) => { p.i = i; });
+      people.list = list;
+      return list;
+    });
+    people.loading.catch(() => { people.loading = null; });
+  }
+  return people.loading;
+}
+
+async function renderPeople() {
+  const body = $('indexBody');
+  for (const b of document.querySelectorAll('.pview-btn')) b.classList.toggle('active', b.dataset.view === indexUi.pview);
+  if (!people.list) {
+    body.innerHTML = '<div class="res-summary">Carico i personaggi…</div>';
+    try {
+      await loadPeople();
+    } catch (e) {
+      body.innerHTML = '<div class="res-summary">Impossibile caricare i personaggi: controlla la connessione.</div>';
+      return;
+    }
+    if (indexUi.section !== 'personaggi') return;
+  }
+  const words = norm($('peopleFilter').value).split(/\s+/).filter((w) => w.length > 1);
+  const list = people.list.filter((p) => words.every((w) => p.key.includes(w)));
+  const groups = new Map();
+  if (indexUi.pview === 'nome') {
+    for (const p of list) {
+      const letter = ((norm(p.main).match(/[a-z]/) || ['#'])[0]).toUpperCase();
+      if (!groups.has(letter)) groups.set(letter, []);
+      groups.get(letter).push(p);
+    }
+  } else {
+    const order = (k) => (ROLE_ORDER.includes(k) ? ROLE_ORDER.indexOf(k) : 999);
+    const keys = [...new Set(list.flatMap((p) => p.k))].sort((a, b) => order(a) - order(b) || a.localeCompare(b, 'it'));
+    for (const k of keys) groups.set(k, list.filter((p) => p.k.includes(k)));
+  }
+  const filtering = words.length > 0;
+  const openGroups = filtering && (list.length <= 60 || groups.size === 1);
+  const openCards = filtering && list.length <= 3;
+  const cited = list.filter((p) => p.cit).length;
+  let html = `<div class="res-summary">${filtering
+    ? `${fmt(list.length)} ${list.length === 1 ? 'personaggio trovato' : 'personaggi trovati'}`
+    : `${fmt(list.length)} personaggi: ${fmt(list.length - cited)} in scena, ${fmt(cited)} solo citati`}</div>`;
+  if (!list.length) html += '<div class="res-summary">Nessun personaggio con questo nome o ruolo.</div>';
+  for (const [g, ps] of groups) {
+    html += `<details class="tree tree-vol pg-group"${openGroups ? ' open' : ''}>
+      <summary><span class="tw" aria-hidden="true"></span><b>${esc(g)}</b> <small>${fmt(ps.length)}</small></summary>` +
+      ps.map((p) => `<details class="tree pg" data-i="${p.i}"${openCards ? ' open' : ''}>
+        <summary><span class="tw" aria-hidden="true"></span><span class="ttl"><b>${esc(p.main)}</b>${p.note ? ` <small>${esc(p.note)}</small>` : ''}</span>${p.cit ? '<span class="tag-cit">citato</span>' : ''}</summary>
+        <div class="pg-body"></div>
+      </details>`).join('') +
+      '</details>';
+  }
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  for (const d of body.querySelectorAll('.pg[open]')) fillPerson(d);
+}
+
+/** "(Vol II Cap 104)" diventa un collegamento al capitolo. */
+function refLinks(text) {
+  return esc(text).replace(/Vol ([IVX]+) Cap (\d+)/g, (m, v, n) => `<button type="button" class="cap-link" data-cap="${n}">${m}</button>`);
+}
+
+/** La scheda si prepara solo quando la si apre. */
+function fillPerson(d) {
+  const box = d.querySelector('.pg-body');
+  if (box.dataset.done) return;
+  const p = people.list[Number(d.dataset.i)];
+  const field = (label, text) => (text ? `<div class="pg-f"><span class="pg-l">${label}</span><p>${refLinks(text)}</p></div>` : '');
+  box.innerHTML = field('Ruolo', p.r) + (p.cit
+    ? field('Chi è', p.s) + field('Dove è citato', p.d)
+    : field('Storia nel libro', p.s) + field('Carattere', p.c) + field('Momenti in cui è presente', p.m));
+  box.dataset.done = '1';
+}
+
+/** La parola da evidenziare nel capitolo: il primo nome proprio (es. "Abele", "Zaccheo"). */
+function nameToken(p) {
+  const skip = /^(il|lo|la|gli|le|un|uno|una|san|santo|santa|re|donna|uomo|vecchio|vecchia|giovane|figlio|figlia|madre|padre|moglie|marito|sposa|sposo)$/;
+  for (const w of p.main.split(/[\s,'’«»"]+/)) {
+    const f = fold(w);
+    if (w.length >= 3 && /^[A-ZÀ-Ý]/.test(w) && !skip.test(f)) return f;
+  }
+  return null;
+}
+
+async function openFromPerson(n, p) {
+  closeIndex();
+  switchTab('valtortaPane');
+  await openChapter(n);
+  if (state.chapter !== n) return;
+  const q = nameToken(p);
+  const marks = q ? markAll(q, true) : [];
+  if (marks.length) {
+    marks[0].scrollIntoView({ block: 'center' });
+    marks[0].classList.add('flash');
+    setTimeout(() => marks[0].classList.remove('flash'), 2500);
+  } else {
+    $('valtortaPane').scrollIntoView({ block: 'start' });
+  }
+}
+
+/** Evidenzia nel capitolo aperto tutte le occorrenze di q (testo già "fold"); restituisce le frasi toccate. */
+function markAll(q, wholeWord = false) {
+  const re = new RegExp((wholeWord ? '\\b' : '') + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (wholeWord ? '\\b' : ''), 'g');
+  const touched = [];
+  for (const s of $('chapterText').querySelectorAll('.s')) {
+    const t = s.textContent;
+    const low = fold(t);
+    re.lastIndex = 0;
+    if (!re.test(low)) continue;
+    re.lastIndex = 0;
+    let html = '';
+    let lastEnd = 0;
+    for (let m = re.exec(low); m; m = re.exec(low)) {
+      html += esc(t.slice(lastEnd, m.index)) + '<mark>' + esc(t.slice(m.index, m.index + m[0].length)) + '</mark>';
+      lastEnd = m.index + m[0].length;
+    }
+    s.innerHTML = html + esc(t.slice(lastEnd));
+    touched.push(s);
+  }
+  return touched;
 }
 
 /* ---------- apertura, chiusura, eventi ---------- */
@@ -1052,6 +1191,7 @@ function openIndex() {
   }
   closeSearch();
   $('indexFilter').value = '';
+  $('peopleFilter').value = '';
   renderIndex();
   $('indexSheet').hidden = false;
   document.body.classList.add('noscroll');
@@ -1108,7 +1248,38 @@ function bindIndex() {
     else filterTitles();
     $('indexFilter').blur();   // chiude la tastiera del telefono
   });
+  for (const b of document.querySelectorAll('.sec-btn')) {
+    b.addEventListener('click', () => {
+      indexUi.section = b.dataset.sec;
+      store('indiceSezione', indexUi.section);
+      renderIndex();
+      const target = $('indexBody').querySelector('.cur, .last');
+      if (target) target.scrollIntoView({ block: 'center' });
+    });
+  }
+  for (const b of document.querySelectorAll('.pview-btn')) {
+    b.addEventListener('click', () => {
+      indexUi.pview = b.dataset.view;
+      store('personaggiVista', indexUi.pview);
+      renderPeople();
+    });
+  }
+  let peopleTimer;
+  $('peopleFilter').addEventListener('input', () => {
+    clearTimeout(peopleTimer);
+    peopleTimer = setTimeout(renderPeople, 150);
+  });
+  $('peopleSearch').addEventListener('submit', (e) => {
+    e.preventDefault();
+    renderPeople();
+    $('peopleFilter').blur();   // chiude la tastiera del telefono
+  });
   $('indexBody').addEventListener('click', (e) => {
+    const link = e.target.closest('.cap-link');
+    if (link) {
+      openFromPerson(Number(link.dataset.cap), people.list[Number(link.closest('.pg').dataset.i)]);
+      return;
+    }
     const snip = e.target.closest('.snip');
     if (snip) {
       openHit(Number(snip.dataset.n), Number(snip.dataset.p), Number(snip.dataset.i));
@@ -1126,6 +1297,7 @@ function bindIndex() {
   $('indexBody').addEventListener('toggle', (e) => {
     const d = e.target;
     if (d.classList && d.classList.contains('res-ch') && d.open && d.querySelector('.res-snips').dataset.shown === '0') showSnippets(d);
+    if (d.classList && d.classList.contains('pg') && d.open) fillPerson(d);
   }, true);
   window.addEventListener('popstate', () => closeIndex(true));
   document.addEventListener('keydown', (e) => {

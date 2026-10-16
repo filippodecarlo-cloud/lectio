@@ -135,6 +135,10 @@
     <div class="sheet-head">
       <div class="sheet-row">
         <h2 id="indexTitle">Indice</h2>
+        <div class="seg">
+          <button type="button" class="sec-btn" data-sec="capitoli">Capitoli</button>
+          <button type="button" class="sec-btn" data-sec="personaggi">Personaggi</button>
+        </div>
         <button type="button" class="icon-btn" id="indexClose" title="Chiudi" aria-label="Chiudi l'indice">✕</button>
       </div>
       <form class="idx-search" id="indexSearch" autocomplete="off">
@@ -142,6 +146,13 @@
         <div class="seg small">
           <button type="button" class="scope-btn" data-scope="titoli">Titoli</button>
           <button type="button" class="scope-btn" data-scope="testo">Tutto il testo</button>
+        </div>
+      </form>
+      <form class="idx-search" id="peopleSearch" autocomplete="off" hidden>
+        <input type="search" id="peopleFilter" placeholder="Cerca per nome o ruolo (es. Lazzaro, fariseo)" enterkeyhint="search" autocapitalize="off" spellcheck="false">
+        <div class="seg small">
+          <button type="button" class="pview-btn" data-view="nome">Per nome</button>
+          <button type="button" class="pview-btn" data-view="ruolo">Per ruolo</button>
         </div>
       </form>
     </div>

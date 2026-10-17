@@ -411,12 +411,12 @@ async function showComputed(date, longDate, fallback = false) {
   $('gospelRef').textContent = `Dal Vangelo secondo ${BOOK_FULL[ref.book]} ${g.vangelo.slice(3)}`;
   state.reading = ref;
   showMatches(ref);
-  const lines = await passageLines(ref).catch(() => null);
+  const text = await passageLines(ref).catch(() => null);
   if (state.date !== date) return;
-  renderParas($('gospelText'), lines || [], 'Testo evangelico non disponibile senza connessione.');
+  renderParas($('gospelText'), text ? text.lines : [], 'Testo evangelico non disponibile senza connessione.');
   $('gospelSource').textContent = (fallback ? 'Evangelizo non risponde: ' : '') +
-    'Vangelo indicato dal calendario liturgico; testo nella traduzione Riveduta 1927 (getbible.net). ' +
-    `Il testo liturgico CEI è disponibile da ${MAX_DAYS} giorni prima a ${MAX_DAYS} giorni dopo oggi.`;
+    'Vangelo indicato dal calendario liturgico. ' + (text ? text.source : '') +
+    ` Il testo del Lezionario (CEI 2008) è disponibile da ${MAX_DAYS} giorni prima a ${MAX_DAYS} giorni dopo oggi.`;
 }
 
 /** Mostra i capitoli corrispondenti al brano e apre il primo. */
@@ -1357,8 +1357,32 @@ async function runSearch(q) {
 }
 
 /** Brano cercato a mano: testo evangelico (Riveduta, dominio pubblico) + capitoli corrispondenti. */
-/** Testo di un brano evangelico (traduzione Riveduta, dominio pubblico), versetto per versetto. */
+/** Testo di un brano evangelico, versetto per versetto: Bibbia CEI 1974 (dati dell'app, cifrati nel sito);
+    se non disponibile (es. manca la chiave), traduzione Riveduta da getbible.net. */
+let vangeliCei = null;
+const SOURCE_CEI = 'Testo CEI 1974 (La Sacra Bibbia, vatican.va).';
+const SOURCE_RIVEDUTA = 'Traduzione Riveduta 1927 (getbible.net).';
+
 async function passageLines(ref) {
+  try {
+    if (!vangeliCei) vangeliCei = readData('vangeli');
+    const book = (await vangeliCei)[ref.book];
+    const lines = [];
+    for (const [c1, v1, c2, v2] of ref.segs) {
+      for (let c = c1; c <= c2; c++) {
+        for (const [v, text] of Object.entries(book[c] || {})) {
+          if (pos(c, +v) >= pos(c1, v1) && pos(c, +v) <= pos(c2, v2)) lines.push(`${v} ${text}`);
+        }
+      }
+    }
+    if (lines.length) return { lines, source: SOURCE_CEI };
+  } catch (e) {
+    vangeliCei = null;
+  }
+  return { lines: await rivedutaLines(ref), source: SOURCE_RIVEDUTA };
+}
+
+async function rivedutaLines(ref) {
   const chapters = new Set();
   for (const [c1, , c2] of ref.segs) for (let c = c1; c <= c2; c++) chapters.add(c);
   const data = {};
@@ -1391,10 +1415,10 @@ async function showPassage(ref) {
   switchTab('valtortaPane');
 
   try {
-    const lines = await passageLines(ref);
+    const { lines, source } = await passageLines(ref);
     if (state.reading !== ref) return;
     renderParas($('gospelText'), lines, 'Brano non trovato.');
-    $('gospelSource').textContent = 'Traduzione Riveduta 1927 (getbible.net). Il testo liturgico CEI è disponibile solo per il Vangelo del giorno.';
+    $('gospelSource').textContent = source;
   } catch (e) {
     if (state.reading === ref) renderParas($('gospelText'), [], 'Testo evangelico non disponibile offline.');
   }

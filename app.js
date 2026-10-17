@@ -3,7 +3,7 @@
 
 const EVANGELIZO = 'https://feed.evangelizo.org/v2/reader.php';
 const GETBIBLE = 'https://api.getbible.net/v2/riveduta';
-const MAX_DAYS = 29;                       // Evangelizo accetta solo date entro ~30 giorni da oggi
+const MAX_DAYS = 29;                       // Evangelizo accetta solo date entro ~30 giorni da oggi; oltre, il Vangelo si calcola
 
 const BOOKS = {
   mt: 'Mt', matteo: 'Mt', mat: 'Mt',
@@ -352,9 +352,7 @@ function pruneDayCache() {
 /* ------------------------------------------------------------------ interfaccia */
 
 function setDateBounds() {
-  const inp = $('dateInput');
-  inp.min = ymd(addDays(today(), -MAX_DAYS));
-  inp.max = ymd(addDays(today(), MAX_DAYS));
+  state.todayKey = ymd(today());   // per accorgersi del cambio di giorno quando si torna sull'app
 }
 
 function renderParas(el, paras, emptyMsg) {
@@ -371,8 +369,6 @@ async function showDate(date, { pushHash = true } = {}) {
   state.date = date;
   $('dateInput').value = ymd(date);
   const off = daysFromToday(date);
-  $('prevDay').disabled = off <= -MAX_DAYS;
-  $('nextDay').disabled = off >= MAX_DAYS;
   $('todayBtn').disabled = off === 0;
   if (pushHash) setHash(off === 0 ? '' : '#/' + ymd(date));
 
@@ -384,9 +380,7 @@ async function showDate(date, { pushHash = true } = {}) {
   renderParas($('gospelText'), [], 'Caricamento del Vangelo…');
 
   if (Math.abs(off) > MAX_DAYS) {
-    $('gospelRef').textContent = 'Data fuori intervallo';
-    renderParas($('gospelText'), [], `Il Vangelo del giorno è disponibile solo da ${MAX_DAYS} giorni prima a ${MAX_DAYS} giorni dopo oggi. Puoi comunque cercare un brano qualsiasi con la lente in alto.`);
-    showMatches(null);
+    showComputed(date, longDate);
     return;
   }
 
@@ -395,14 +389,7 @@ async function showDate(date, { pushHash = true } = {}) {
     day = await fetchDay(date);
   } catch (e) {
     if (state.date !== date) return;
-    $('gospelRef').textContent = 'Vangelo non disponibile';
-    renderParas($('gospelText'), [], 'Non è stato possibile scaricare il Vangelo del giorno. Controlla la connessione e riprova tra qualche istante.');
-    const retry = document.createElement('button');
-    retry.className = 'text-btn primary';
-    retry.textContent = 'Riprova';
-    retry.addEventListener('click', () => showDate(date, { pushHash: false }));
-    $('gospelText').appendChild(retry);
-    showMatches(null);
+    showComputed(date, longDate, true);   // Evangelizo non risponde: si usa il calendario calcolato
     return;
   }
   if (state.date !== date) return;                    // nel frattempo l'utente ha cambiato data
@@ -414,6 +401,22 @@ async function showDate(date, { pushHash = true } = {}) {
   $('gospelSource').textContent = 'Testo liturgico CEI tramite evangelizo.org';
   state.reading = parseRef(day.refText);
   showMatches(state.reading);
+}
+
+/** Giorno liturgico e Vangelo calcolati (calendario.js): per le date lontane o se Evangelizo non risponde. */
+async function showComputed(date, longDate, fallback = false) {
+  const g = giornoLiturgico(date.getFullYear(), date.getMonth() + 1, date.getDate());
+  const ref = parseRef(g.vangelo);
+  $('liturgy').textContent = `${longDate} — ${g.nome}`;
+  $('gospelRef').textContent = `Dal Vangelo secondo ${BOOK_FULL[ref.book]} ${g.vangelo.slice(3)}`;
+  state.reading = ref;
+  showMatches(ref);
+  const lines = await passageLines(ref).catch(() => null);
+  if (state.date !== date) return;
+  renderParas($('gospelText'), lines || [], 'Testo evangelico non disponibile senza connessione.');
+  $('gospelSource').textContent = (fallback ? 'Evangelizo non risponde: ' : '') +
+    'Vangelo indicato dal calendario liturgico; testo nella traduzione Riveduta 1927 (getbible.net). ' +
+    `Il testo liturgico CEI è disponibile da ${MAX_DAYS} giorni prima a ${MAX_DAYS} giorni dopo oggi.`;
 }
 
 /** Mostra i capitoli corrispondenti al brano e apre il primo. */
@@ -1354,6 +1357,26 @@ async function runSearch(q) {
 }
 
 /** Brano cercato a mano: testo evangelico (Riveduta, dominio pubblico) + capitoli corrispondenti. */
+/** Testo di un brano evangelico (traduzione Riveduta, dominio pubblico), versetto per versetto. */
+async function passageLines(ref) {
+  const chapters = new Set();
+  for (const [c1, , c2] of ref.segs) for (let c = c1; c <= c2; c++) chapters.add(c);
+  const data = {};
+  await Promise.all([...chapters].map(async (c) => {
+    const r = await fetch(`${GETBIBLE}/${BOOK_NR[ref.book]}/${c}.json`);
+    data[c] = (await r.json()).verses;
+  }));
+  const lines = [];
+  for (const [c1, v1, c2, v2] of ref.segs) {
+    for (let c = c1; c <= c2; c++) {
+      for (const v of data[c] || []) {
+        if (pos(c, v.verse) >= pos(c1, v1) && pos(c, v.verse) <= pos(c2, v2)) lines.push(`${v.verse} ${v.text.trim()}`);
+      }
+    }
+  }
+  return lines;
+}
+
 async function showPassage(ref) {
   state.reading = ref;
   setHash('#/brano/' + encodeURIComponent(formatRef(ref)));
@@ -1368,21 +1391,7 @@ async function showPassage(ref) {
   switchTab('valtortaPane');
 
   try {
-    const chapters = new Set();
-    for (const [c1, , c2] of ref.segs) for (let c = c1; c <= c2; c++) chapters.add(c);
-    const data = {};
-    await Promise.all([...chapters].map(async (c) => {
-      const r = await fetch(`${GETBIBLE}/${BOOK_NR[ref.book]}/${c}.json`);
-      data[c] = (await r.json()).verses;
-    }));
-    const lines = [];
-    for (const [c1, v1, c2, v2] of ref.segs) {
-      for (let c = c1; c <= c2; c++) {
-        for (const v of data[c] || []) {
-          if (pos(c, v.verse) >= pos(c1, v1) && pos(c, v.verse) <= pos(c2, v2)) lines.push(`${v.verse} ${v.text.trim()}`);
-        }
-      }
-    }
+    const lines = await passageLines(ref);
     if (state.reading !== ref) return;
     renderParas($('gospelText'), lines, 'Brano non trovato.');
     $('gospelSource').textContent = 'Traduzione Riveduta 1927 (getbible.net). Il testo liturgico CEI è disponibile solo per il Vangelo del giorno.';
@@ -1554,7 +1563,7 @@ function bind() {
   });
   // a mezzanotte (o al ritorno sull'app il giorno dopo) aggiorna limiti e "oggi"
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && $('dateInput').min !== ymd(addDays(today(), -MAX_DAYS))) {
+    if (document.visibilityState === 'visible' && state.todayKey !== ymd(today())) {
       setDateBounds();
       if (!location.hash) showDate(today(), { pushHash: false });
     }

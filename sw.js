@@ -1,6 +1,6 @@
 // App shell in cache all'installazione; i volumi della Valtorta vengono salvati alla prima lettura.
-const CACHE = 'vangelo-valtorta-v6';
-const CORE = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
+const CACHE = 'vangelo-valtorta-v7';
+const CORE = ['./', 'index.html', 'style.css', 'calendario.js', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
